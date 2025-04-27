@@ -11,18 +11,19 @@ ll counter=0;
 // (32-s-b) bits   |  s bits  |  b bits  |
 
 enum mesi_state { I, M, S, E };
+enum message {BusRd,BusRdx}; //BusRdx is RWITM  
 
 
-struct block{
+typedef struct block{
     ll data; //32 bit data
     ll tag;
     ll last_used=-1;//for LRU implementation
     bool dirty_bit=0;
     bool valid_bit=0;
     mesi_state state=I;
-};
+} block;
 
-struct core{
+typedef struct core{
 
     int core_id; // core id
     ll ct_write_instructions = 0; // number of write instructions
@@ -37,31 +38,36 @@ struct core{
     int s = 0; // s is number of set index bits
     int b = 0; // b is number of block offset bits
     int E = 0; // E is number of lines in a set(associativity)
-};
+} core;
 
-struct set{
+typedef struct set{
     std::vector<block> set; // each element of vector is [tag,block(data)]
-};
+}set ;
 
 class Memory {
     private:
         std::map<ll, ll> mem;
 };
 
-struct L1cache{
+typedef struct L1cache{
     std::vector<set> table; //maps(vector)index to set
     int s=0;int b=0;int E=0;
 
-};
+} L1cache;
 
-struct mesi_data_bus{
+typedef struct mesi_data_bus{
     ll data;
     ll address;
     int core_id; // core id
-    int type; // type of the transaction (read/write)
+    mesi_state next_state; // at end of bus operation, find this address in core id cache and update the state
+    message message; // type of the transaction (read/write)
+    bool is_busy=false;
+    ll wait_cycles=0;
     std::vector<core> cores; // vector of cores as per core id
     std::vector<L1cache> caches;
-};
+
+} mesi_data_bus;
+
 
 
 
@@ -74,32 +80,110 @@ ll hit_or_miss(ll address,struct core &core, struct L1cache &this_cache){
     ll req_tag = (address>>((this_cache.b) + (this_cache.s)));
     set this_set = this_cache.table[index];
     for(int i=0;i<this_set.set.size();i++){
-        if((this_set.set)[i].tag==req_tag){
+        if((this_set.set)[i].tag==req_tag && this_set.set[i].state!=I){
             return i;
         }
     }
     return -1;
 }
 
-ll read(ll address, struct core &core, struct L1cache &this_cache,struct mesi_data_bus mesi){
+ll read_miss(ll address,struct core &core,struct L1cache &cache,struct mesi_data_bus &mesi_data_bus){
+    core.ct_cache_misses+=1;
+    ll which_case=0; //0 - no hit, 1- exclusive , 2- shared , 3 - Modified
+    block hit_block;
     
-    ll temp=hit_or_miss(address,core,this_cache);
-    if(temp==-1){
-        return read_miss(address,core);
+    for(int i=0;i<mesi_data_bus.caches.size();i++){
+        // assume S and M cannot coexist
+        ll index = (address >> (mesi_data_bus.caches[i].b)) % (1 << mesi_data_bus.caches[i].s);
+        ll temp=hit_or_miss(address,core,mesi_data_bus.caches[i]);
+
+        if(temp!=-1){
+            // hit
+            if(mesi_data_bus.caches[i].table[index].set[temp].state ==M){
+                hit_block=mesi_data_bus.caches[i].table[index].set[temp];
+                which_case=3;break;
+            }
+
+            else if(mesi_data_bus.caches[i].table[index].set[temp].state ==E){
+                hit_block=mesi_data_bus.caches[i].table[index].set[temp];
+                which_case=1;break;
+            }
+            else{
+                hit_block=mesi_data_bus.caches[i].table[index].set[temp];
+                which_case=2;break;
+            }
+        } 
+
+    }
+
+    mesi_data_bus.core_id=core.core_id;
+    mesi_data_bus.message=BusRd;
+    if(which_case==0){
+        // no hit
+        core.wait_cycles=100 + 1; 
+
+    }
+    else if(which_case==1){
+        // exclusive found
+        hit_block.state=S; // the hitted block's state becomes shared
+        core.wait_cycles=2*(core.b) + 1;
+        mesi_data_bus.wait_cycles=2*(core.b);
+    }
+
+    else if(which_case==2){
+        // shared found , use the first cache in order to use data
+        core.wait_cycles=2*(core.b) + 1;
+        mesi_data_bus.wait_cycles=2*(core.b); 
     }
     else{
-        ll index = (address >> this_cache.b) % (1 << this_cache.s);
-        return this_cache.table[index].set[temp].data; // return the data of the block
+        // M found
+        hit_block.state=S;
+        core.wait_cycles= 100 + 100 +1 ;
+        mesi_data_bus.wait_cycles=100+100;
+    }
+
+    return which_case; //return which_case of readmiss so that the state of newly inserted block can be determined
+}
+bool read(ll address, struct core &core, struct L1cache &this_cache,struct mesi_data_bus &mesi_data_bus){
+    core.ct_cache_hits+=1;
+    ll temp=hit_or_miss(address,core,this_cache);
+    ll index = (address >> (this_cache.b)) % (1 << this_cache.s);
+    if(temp==-1){
+        if(mesi_data_bus.is_busy==false){
+            // bus is busy, so read is not possible
+            return false;
+        }
+
+        std::vector<ll> res = add_new_block(address,0,this_cache.table[index],this_cache);
+
+        ll which_case = read_miss(address,core,this_cache,mesi_data_bus);
+        if(which_case==0){
+            // no hit
+            mesi_data_bus.next_state=E;
+        }
+        else{
+            mesi_data_bus.next_state=S;
+        }
+
+        if(res[0]==1){
+            //write_back during eviction
+            core.wait_cycles+=100;
+        }
+        return true;
+    }
+    else{
+        //hit 
+        //make last used of tempth way of mapped set = counter
+        this_cache.table[index].set[temp].last_used=counter;
+        core.wait_cycles=1;
+        return true;
     }
 }
 
-ll read_miss(ll address,struct core core){
-    
 
-    
-}
 
-ll add_new_block(ll address,ll new_data, set &this_set,struct L1cache this_cache){
+std::vector<ll> add_new_block(ll address,ll new_data, set &this_set,struct L1cache &this_cache){
+    //adds new block in a given set res[0]=1 if there is a eviction writeback, res[1] gives the index of block in this set
     ll ind=0;
     ll min=INT_MAX;
     for(int i=0;i<this_set.set.size();i++){
@@ -108,6 +192,11 @@ ll add_new_block(ll address,ll new_data, set &this_set,struct L1cache this_cache
             ind=i;
         }
     }
+    ll write_eviction=0;
+    if(this_set.set[ind].valid_bit==1 && this_set.set[ind].dirty_bit==1){
+        //Invalid or empty block found
+        write_eviction=0;
+    }
     block new_block;
     new_block.data=new_data;
     new_block.tag=(address>>(this_cache.b+this_cache.s));
@@ -115,12 +204,13 @@ ll add_new_block(ll address,ll new_data, set &this_set,struct L1cache this_cache
     new_block.dirty_bit=0;
     new_block.last_used=counter;
     this_set.set[ind]=new_block;
-    return ind; // return the index of the newly inserted block
+    return {write_eviction,ind};
+     // return the index of the newly inserted block
     // caller needs to set the state of the newly inserted block
 }
 
 
 int main(){
-
+    return 0;
 }
 
