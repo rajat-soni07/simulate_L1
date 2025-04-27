@@ -87,6 +87,34 @@ ll hit_or_miss(ll address,struct core &core, struct L1cache &this_cache){
     return -1;
 }
 
+
+std::vector<ll> add_new_block(ll address,ll new_data, set &this_set,struct L1cache &this_cache){
+    //adds new block in a given set res[0]=1 if there is a eviction writeback, res[1] gives the index of block in this set
+    ll ind=0;
+    ll min=INT_MAX;
+    for(int i=0;i<this_set.set.size();i++){
+        if(this_set.set[i].last_used<min){
+            min=this_set.set[i].last_used;
+            ind=i;
+        }
+    }
+    ll write_eviction=0;
+    if(this_set.set[ind].valid_bit==1 && this_set.set[ind].dirty_bit==1){
+        //Invalid or empty block found
+        write_eviction=0;
+    }
+    block new_block;
+    new_block.data=new_data;
+    new_block.tag=(address>>(this_cache.b+this_cache.s));
+    new_block.valid_bit=1;
+    new_block.dirty_bit=0;
+    new_block.last_used=counter;
+    this_set.set[ind]=new_block;
+    return {write_eviction,ind};
+     // return the index of the newly inserted block
+    // caller needs to set the state of the newly inserted block
+}
+
 ll read_miss(ll address,struct core &core,struct L1cache &cache,struct mesi_data_bus &mesi_data_bus){
     core.ct_cache_misses+=1;
     ll which_case=0; //0 - no hit, 1- exclusive , 2- shared , 3 - Modified
@@ -138,12 +166,14 @@ ll read_miss(ll address,struct core &core,struct L1cache &cache,struct mesi_data
     else{
         // M found
         hit_block.state=S;
+        hit_block.dirty_bit=0;//No more  dirty,it matches with memory
         core.wait_cycles= 100 + 100 +1 ;
         mesi_data_bus.wait_cycles=100+100;
     }
 
     return which_case; //return which_case of readmiss so that the state of newly inserted block can be determined
 }
+
 bool read(ll address, struct core &core, struct L1cache &this_cache,struct mesi_data_bus &mesi_data_bus){
     core.ct_cache_hits+=1;
     ll temp=hit_or_miss(address,core,this_cache);
@@ -154,7 +184,7 @@ bool read(ll address, struct core &core, struct L1cache &this_cache,struct mesi_
             return false;
         }
 
-        std::vector<ll> res = add_new_block(address,0,this_cache.table[index],this_cache);
+
 
         ll which_case = read_miss(address,core,this_cache,mesi_data_bus);
         if(which_case==0){
@@ -164,11 +194,13 @@ bool read(ll address, struct core &core, struct L1cache &this_cache,struct mesi_
         else{
             mesi_data_bus.next_state=S;
         }
-
+        std::vector<ll> res = add_new_block(address,0,this_cache.table[index],this_cache);
         if(res[0]==1){
             //write_back during eviction
             core.wait_cycles+=100;
+            mesi_data_bus.wait_cycles+=100;
         }
+        this_cache.table[index].set[res[1]].last_used=counter; //update last used for lru policy
         return true;
     }
     else{
@@ -181,33 +213,107 @@ bool read(ll address, struct core &core, struct L1cache &this_cache,struct mesi_
 }
 
 
+ll write_miss(ll address,struct core &core,struct L1cache &this_cache,struct mesi_data_bus &mesi_data_bus){
+    core.ct_cache_misses+=1;
+    ll which_case=0; //0 - no hit, 1- exclusive , 2- shared , 3 - Modified
+    block hit_block;
+    
+    for(int i=0;i<mesi_data_bus.caches.size();i++){
+        // assume S and M cannot coexist
+        ll index = (address >> (mesi_data_bus.caches[i].b)) % (1 << mesi_data_bus.caches[i].s);
+        ll temp=hit_or_miss(address,core,mesi_data_bus.caches[i]);
 
-std::vector<ll> add_new_block(ll address,ll new_data, set &this_set,struct L1cache &this_cache){
-    //adds new block in a given set res[0]=1 if there is a eviction writeback, res[1] gives the index of block in this set
-    ll ind=0;
-    ll min=INT_MAX;
-    for(int i=0;i<this_set.set.size();i++){
-        if(this_set.set[i].last_used<min){
-            min=this_set.set[i].last_used;
-            ind=i;
+        if(temp!=-1){
+            // hit
+            if(mesi_data_bus.caches[i].table[index].set[temp].state ==M){
+                hit_block=mesi_data_bus.caches[i].table[index].set[temp];
+                which_case=3;break;
+            }
+
+            else if(mesi_data_bus.caches[i].table[index].set[temp].state ==E){
+                hit_block=mesi_data_bus.caches[i].table[index].set[temp];
+                which_case=1;break;
+            }
+            else{
+                hit_block=mesi_data_bus.caches[i].table[index].set[temp];
+                which_case=2;break;
+            }
+        } 
+
+    }
+    ll index = (address >> (this_cache.b)) % (1 << this_cache.s);
+    mesi_data_bus.message=BusRdx;
+    //Snooping in occurs as caches see BusRdx on data_bu
+    if(which_case==0){
+        core.wait_cycles=100+1;
+        mesi_data_bus.wait_cycles=100+1;
+        return 0;
+    }
+    else if(which_case==1 or which_case==2){
+        core.wait_cycles=2*(core.b) +1 ;
+        mesi_data_bus.wait_cycles=2*(core.b) +1;
+        //Invalidate all states
+        for(int i=0;i<mesi_data_bus.caches.size();i++){
+            ll temp=hit_or_miss(address,core,this_cache);
+            if(temp!=-1){
+                mesi_data_bus.caches[i].table[index].set[temp].state=I;
+                mesi_data_bus.caches[i].table[index].set[temp].valid_bit=0;
+            }
         }
+        return 0;
     }
-    ll write_eviction=0;
-    if(this_set.set[ind].valid_bit==1 && this_set.set[ind].dirty_bit==1){
-        //Invalid or empty block found
-        write_eviction=0;
+    else{
+        //in simulator check if mesi_bus is in Rdx and the state change in final cycle is imposed on M->I or not
+        //If it is M->I, dont go on next instruction for the core and do this instruction on priority
+        mesi_data_bus.wait_cycles=100;
+        core.wait_cycles=100; //only perform write back from this M block to memory
+        return 1;
     }
-    block new_block;
-    new_block.data=new_data;
-    new_block.tag=(address>>(this_cache.b+this_cache.s));
-    new_block.valid_bit=1;
-    new_block.dirty_bit=0;
-    new_block.last_used=counter;
-    this_set.set[ind]=new_block;
-    return {write_eviction,ind};
-     // return the index of the newly inserted block
-    // caller needs to set the state of the newly inserted block
+
 }
+
+bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_bus){
+    ll temp = hit_or_miss(address,core,this_cache);
+    ll index = (address >> (this_cache.b)) % (1 << this_cache.s);
+    if(temp!=-1){
+        //hit
+        block this_block = this_cache.table[index].set[temp];
+        this_block.dirty_bit=1;
+        core.wait_cycles=1;
+        if(this_block.state==S){
+            for(int i=0;i<mesi_data_bus.caches.size();i++){
+                ll temp=hit_or_miss(address,core,this_cache);
+                if(temp!=-1){
+                    mesi_data_bus.caches[i].table[index].set[temp].state=I;
+                    mesi_data_bus.caches[i].table[index].set[temp].valid_bit=0;
+                }
+            }
+        }
+        this_block.state=M;
+        this_block.last_used=counter;
+        return true;
+    }
+    else{
+        //NOTE- IN case of write miss, at end of transaction, along with making state of the block M, also set the dirty bit
+        if(mesi_data_bus.is_busy==false){return false;}
+
+        ll is_writeback_from_M=write_miss(address,core,this_cache,mesi_data_bus);
+        if(!is_writeback_from_M){
+        mesi_data_bus.next_state=M;}
+        else{
+            mesi_data_bus.next_state=I;
+        }
+        std::vector<ll> res = add_new_block(address,0,this_cache.table[index],this_cache);
+        if(res[0]==1){
+            //write_back during eviction
+            core.wait_cycles+=100;
+            mesi_data_bus.wait_cycles+=100;
+        }
+        this_cache.table[index].set[res[1]].last_used=counter; //update last used for lru policy
+        return true;
+    }
+}
+
 
 
 int main(){
