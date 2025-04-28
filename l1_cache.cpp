@@ -35,6 +35,7 @@ typedef struct core{
     ll ct_idle_cycles = 0; // number of idle cycles
     ll ct_cache_evictions = 0; // number of cache evictions
     ll ct_writebacks = 0; // number of writebacks
+    ll ct_invalidations = 0; // number of invalidations
 
     ll wait_cycles =0; //number of cycles remained in the work this core is doing
     int s = 0; // s is number of set index bits
@@ -62,8 +63,8 @@ typedef struct mesi_data_bus{
     message message; // type of the transaction (read/write)
     bool is_busy=false;
     ll wait_cycles=0;
-    std::vector<core> cores; // vector of cores as per core id
-    std::vector<L1cache> caches;
+    std::vector<core*> cores; // vector of cores as per core id
+    std::vector<L1cache*> caches;
 } mesi_data_bus;
 
 
@@ -96,10 +97,15 @@ std::vector<ll> add_new_block(ll address,ll new_data, set &this_set, L1cache &th
             ind=i;
         }
     }
-    ll write_eviction=0;
-    if(this_set.set[ind].valid_bit==1 && this_set.set[ind].dirty_bit==1){
+    ll eviction_type=0;//0 - no eviction 1-normal eviction 2- writeback eviction
+    if(this_set.set[ind].valid_bit==1){
         //Valid and dirty block needs to be evicted
-        write_eviction=1;
+        if(this_set.set[ind].dirty_bit==1){
+            eviction_type=2;
+        }
+        else{
+            eviction_type=1;
+        }
     }
     block new_block;
     new_block.data=new_data;
@@ -108,7 +114,7 @@ std::vector<ll> add_new_block(ll address,ll new_data, set &this_set, L1cache &th
     new_block.dirty_bit=0;
     new_block.last_used=counter;
     this_set.set[ind]=new_block;
-    std::vector<ll> ans ={write_eviction,ind};
+    std::vector<ll> ans ={eviction_type,ind};
     return ans;
      // return the index of the newly inserted block
     // caller needs to set the state of the newly inserted block
@@ -117,26 +123,26 @@ std::vector<ll> add_new_block(ll address,ll new_data, set &this_set, L1cache &th
 ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
     core.ct_cache_misses+=1;
     ll which_case=0; //0 - no hit, 1- exclusive , 2- shared , 3 - Modified
-    block hit_block;
+    block *hit_block;
     
     for(int i=0;i<mesi_data_bus.caches.size();i++){
         // assume S and M cannot coexist
-        ll index = (address >> (mesi_data_bus.caches[i].b)) % (1 << mesi_data_bus.caches[i].s);
-        ll temp=hit_or_miss(address,core,mesi_data_bus.caches[i]);
+        ll index = (address >> (mesi_data_bus.caches[i]->b)) % (1 << mesi_data_bus.caches[i]->s);
+        ll temp=hit_or_miss(address,core,*mesi_data_bus.caches[i]);
 
         if(temp!=-1){
             // hit
-            if(mesi_data_bus.caches[i].table[index].set[temp].state ==M){
-                hit_block=mesi_data_bus.caches[i].table[index].set[temp];
+            if(mesi_data_bus.caches[i]->table[index].set[temp].state ==M){
+                hit_block=&mesi_data_bus.caches[i]->table[index].set[temp];
                 which_case=3;break;
             }
 
-            else if(mesi_data_bus.caches[i].table[index].set[temp].state ==E){
-                hit_block=mesi_data_bus.caches[i].table[index].set[temp];
+            else if(mesi_data_bus.caches[i]->table[index].set[temp].state ==E){
+                hit_block=&mesi_data_bus.caches[i]->table[index].set[temp];
                 which_case=1;break;
             }
-            else if(mesi_data_bus.caches[i].table[index].set[temp].state ==S){
-                hit_block=mesi_data_bus.caches[i].table[index].set[temp];
+            else if(mesi_data_bus.caches[i]->table[index].set[temp].state ==S){
+                hit_block=&mesi_data_bus.caches[i]->table[index].set[temp];
                 which_case=2;break;
             }
         } 
@@ -154,7 +160,7 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
     }
     else if(which_case==1){
         // exclusive found
-        hit_block.state=S; // the hitted block's state becomes shared
+        hit_block->state=S; // the hitted block's state becomes shared
         core.wait_cycles=2*(core.b) + 1;
         mesi_data_bus.wait_cycles=2*(core.b) +1;
         mesi_data_bus.is_busy=true;
@@ -168,8 +174,8 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
     }
     else{
         // M found
-        hit_block.state=S;
-        hit_block.dirty_bit=0;//No more dirty,it matches with memory
+        hit_block->state=S;
+        hit_block->dirty_bit=0;//No more dirty,it matches with memory
         core.wait_cycles= 100 + 100 +1 ;
         mesi_data_bus.wait_cycles=100+100;
         mesi_data_bus.is_busy=true;
@@ -199,11 +205,16 @@ bool read(ll address, core &core, L1cache &this_cache, mesi_data_bus &mesi_data_
             mesi_data_bus.next_state=S;
         }
         std::vector<ll> res = add_new_block(address,0,this_cache.table[index],this_cache);
-        if(res[0]==1){
+        if(res[0]==2){
             //write_back during eviction
             core.ct_cache_evictions+=1;
+            core.ct_writebacks+=1;
             core.wait_cycles+=100;
             mesi_data_bus.wait_cycles+=100;
+        }
+        else if(res[0]==1){
+            //normal eviction
+            core.ct_cache_evictions+=1;
         }
         this_cache.table[index].set[res[1]].last_used=counter; //update last used for lru policy
         
@@ -227,22 +238,22 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
     
     for(int i=0;i<mesi_data_bus.caches.size();i++){
         // assume S and M cannot coexist
-        ll index = (address >> (mesi_data_bus.caches[i].b)) % (1 << mesi_data_bus.caches[i].s);
-        ll temp=hit_or_miss(address,core,mesi_data_bus.caches[i]);
+        ll index = (address >> (mesi_data_bus.caches[i]->b)) % (1 << mesi_data_bus.caches[i]->s);
+        ll temp=hit_or_miss(address,core,*mesi_data_bus.caches[i]);
 
         if(temp!=-1){
             // hit
-            if(mesi_data_bus.caches[i].table[index].set[temp].state ==M){
-                hit_block=mesi_data_bus.caches[i].table[index].set[temp];
+            if(mesi_data_bus.caches[i]->table[index].set[temp].state ==M){
+                hit_block=mesi_data_bus.caches[i]->table[index].set[temp];
                 which_case=3;break;
             }
 
-            else if(mesi_data_bus.caches[i].table[index].set[temp].state ==E){
-                hit_block=mesi_data_bus.caches[i].table[index].set[temp];
+            else if(mesi_data_bus.caches[i]->table[index].set[temp].state ==E){
+                hit_block=mesi_data_bus.caches[i]->table[index].set[temp];
                 which_case=1;break;
             }
             else{
-                hit_block=mesi_data_bus.caches[i].table[index].set[temp];
+                hit_block=mesi_data_bus.caches[i]->table[index].set[temp];
                 which_case=2;break;
             }
         } 
@@ -263,8 +274,9 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
         for(int i=0;i<mesi_data_bus.caches.size();i++){
             ll temp=hit_or_miss(address,core,this_cache);
             if(temp!=-1){
-                mesi_data_bus.caches[i].table[index].set[temp].state=I;
-                mesi_data_bus.caches[i].table[index].set[temp].valid_bit=0;
+                mesi_data_bus.caches[i]->table[index].set[temp].state=I;
+                mesi_data_bus.cores[i]->ct_invalidations+=1;
+                mesi_data_bus.caches[i]->table[index].set[temp].valid_bit=0;
             }
         }
         return 0;
@@ -285,15 +297,16 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
     if(temp!=-1){
         core.ct_cache_hits+=1;
         //hit
-        block this_block = this_cache.table[index].set[temp];
+        block &this_block = this_cache.table[index].set[temp];
         this_block.dirty_bit=1;
         core.wait_cycles=1;
         if(this_block.state==S){
             for(int i=0;i<mesi_data_bus.caches.size();i++){
                 ll temp=hit_or_miss(address,core,this_cache);
                 if(temp!=-1){
-                    mesi_data_bus.caches[i].table[index].set[temp].state=I;
-                    mesi_data_bus.caches[i].table[index].set[temp].valid_bit=0;
+                    mesi_data_bus.caches[i]->table[index].set[temp].state=I;
+                    mesi_data_bus.cores[i]->ct_invalidations+=1;
+                    mesi_data_bus.caches[i]->table[index].set[temp].valid_bit=0;
                 }
             }
         }
@@ -312,10 +325,15 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
             mesi_data_bus.next_state=I;
         }
         std::vector<ll> res = add_new_block(address,0,this_cache.table[index],this_cache);
-        if(res[0]==1){
+        if(res[0]==2){
             //write_back during eviction
+            core.ct_cache_evictions+=1;
+            core.ct_writebacks+=1;
             core.wait_cycles+=100;
             mesi_data_bus.wait_cycles+=100;
+        }
+        else if(res[0]==1){
+            //normal eviction
             core.ct_cache_evictions+=1;
         }
         this_cache.table[index].set[res[1]].last_used=counter; //update last used for lru policy
@@ -355,7 +373,12 @@ int main(){
         cores.push_back(this_core);
     }
     mesi_data_bus mesi_data_bus;
-    mesi_data_bus.cores=cores;mesi_data_bus.caches=caches;
+    for (int i = 0; i < cores.size(); i++) {
+        mesi_data_bus.cores.push_back(&(cores[i]));
+    }
+    for (int i = 0; i < caches.size(); i++) {
+        mesi_data_bus.caches.push_back(&(caches[i]));
+    }
     std::vector<ll> reads(4,0);
     std::vector<ll> writes(4,0);
 
@@ -399,10 +422,10 @@ int main(){
 
         for(int i=0;i<4;i++){
             if(curr[i]==commands[i].size()){
+                cores[i].ct_idle_cycles+=1;
                 continue;
             }
             if(i==done_core){continue;}
-            if(curr[i]>commands[i].size()){cores[i].ct_idle_cycles+=1;continue;}
             if(cores[i].wait_cycles==0){
                 bool temp;
                 if(commands[i][curr[i]][0]==1){
@@ -431,7 +454,7 @@ int main(){
         counter++;
     }
 
-
+    // std::cout<<counter<<std::endl;
     
     std::cout << "Simulation Parameters:\n";
     std::cout << "Trace Prefix: app1\n";
@@ -453,13 +476,13 @@ int main(){
         ll total_instructions = cores[i].ct_read_instructions + cores[i].ct_write_instructions;
         ll num_reads = cores[i].ct_read_instructions;
         ll num_writes = cores[i].ct_write_instructions;
-        ll total_cycles = cores[i].ct_execution_cycles + cores[i].ct_idle_cycles;
+        ll total_cycles = cores[i].ct_execution_cycles ;
         ll idle_cycles = cores[i].ct_idle_cycles;
         ll misses = cores[i].ct_cache_misses;
         double miss_rate = (total_instructions > 0) ? (100.0 * misses / total_instructions) : 0.0;
         ll evictions = cores[i].ct_cache_evictions;
         ll writebacks = cores[i].ct_writebacks;
-        ll invalidations = 0; // Placeholder for invalidations (not explicitly tracked in the code)
+        ll invalidations = cores[i].ct_invalidations;
         ll traffic_bytes = (misses + writebacks) * (1 << (b - 2));
 
         total_bus_transactions += misses + writebacks;
