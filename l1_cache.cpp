@@ -1,8 +1,10 @@
 #include <iostream>
 #include <map>
 #include <vector>
+#include <cstring>
 #define ll long long int
 #include "input.cpp"
+#include <fstream>
 
 
 //when running for a core, access its cache's read/write function and provide the core struct as argument
@@ -341,17 +343,72 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
     }
 }
 
+void print_help() {
+    std::cout << "Usage: ./l1_cache [options]\n"
+              << "-t <tracefile>: name of parallel application\n"
+              << "-s <s>: number of set index bits\n"
+              << "-E <E>: associativity (number of cache lines per set)\n"
+              << "-b <b>: number of block bits\n"
+              << "-o <outfilename>: logs output to file\n"
+              << "-h: prints this help\n";
+}
 
+int main(int argc, char *argv[]){
+    std::string app;
+    int s = -1, E = -1, b = -1;
+    std::string outfilename;
+    
+    if (argc == 1) {
+        print_help();
+        return 0;
+    }
 
-int main(){
-    int s;int b;int E;
-    s=6;
-    b=5;
-    E=2;
+    for (int i = 1; i < argc; ++i) {
+        // std::cout << std::strcmp(argv[i],"-t") << " ";
+        if (std::strcmp(argv[i], "-h") == 0) {
+            print_help();
+            return 0;
+        } else if (std::strcmp(argv[i], "-t") == 0) {
+            if (i + 1 < argc) {
+                app = argv[++i];
+            } else {
+                std::cerr << "Error: -t flag needs a tracefile.\n";
+                return 1;
+            }
+        } else if (std::strcmp(argv[i], "-s") == 0) {
+            if (i + 1 < argc) {
+                s = std::atoi(argv[++i]);
+            } else {
+                std::cerr << "Error: -s flag needs a value.\n";
+                return 1;
+            }
+        } else if (std::strcmp(argv[i], "-E") == 0) {
+            if (i + 1 < argc) {
+                E = std::atoi(argv[++i]);
+            } else {
+                std::cerr << "Error: -E flag needs a value.\n";
+                return 1;
+            }
+        } else if (std::strcmp(argv[i], "-b") == 0) {
+            if (i + 1 < argc) {
+                b = std::atoi(argv[++i]);
+            } else {
+                std::cerr << "Error: -b flag needs a value.\n";
+                return 1;
+            }
+        } else if (std::strcmp(argv[i], "-o") == 0) {
+            if (i + 1 < argc) {
+                outfilename = argv[++i];
+            } else {
+                std::cerr << "Error: -o flag needs an output filename.\n";
+                return 1;
+            }
+        } else {
+            std::cerr << "Unknown flag: " << argv[i] << "\n";
+            return 1;
+        }
+    }
     b+=2;
-    std::string app = "app1";
-    // std::cin>>s>>b>>E;
-    // std::cin>>app;
     std::vector<L1cache> caches;
     std::vector<core> cores;
     for(int i=0;i<4;i++){
@@ -454,7 +511,9 @@ int main(){
         counter++;
     }
 
-    // std::cout<<counter<<std::endl;
+    std::ofstream output_file(outfilename);
+    std::streambuf *cout_buf = std::cout.rdbuf();
+    std::cout.rdbuf(output_file.rdbuf());
     
     std::cout << "Simulation Parameters:\n";
     std::cout << "Trace Prefix: app1\n";
@@ -505,6 +564,9 @@ int main(){
     std::cout << "Overall Bus Summary:\n";
     std::cout << "Total Bus Transactions: " << total_bus_transactions << "\n";
     std::cout << "Total Bus Traffic (Bytes): " << total_bus_traffic << "\n";
+
+    output_file.close();
+    std::cout.rdbuf(cout_buf);
 
 }
 
