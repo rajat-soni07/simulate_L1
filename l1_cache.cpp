@@ -2,6 +2,7 @@
 #include <map>
 #include <vector>
 #define ll long long int
+#include "input.cpp"
 
 
 //when running for a core, access its cache's read/write function and provide the core struct as argument
@@ -34,6 +35,7 @@ typedef struct core{
     ll ct_idle_cycles = 0; // number of idle cycles
     ll ct_cache_evictions = 0; // number of cache evictions
     ll ct_writebacks = 0; // number of writebacks
+
     ll wait_cycles =0; //number of cycles remained in the work this core is doing
     int s = 0; // s is number of set index bits
     int b = 0; // b is number of block offset bits
@@ -65,14 +67,13 @@ typedef struct mesi_data_bus{
     ll wait_cycles=0;
     std::vector<core> cores; // vector of cores as per core id
     std::vector<L1cache> caches;
-
 } mesi_data_bus;
 
 
 
 
 
-ll hit_or_miss(ll address,struct core &core, struct L1cache &this_cache){
+ll hit_or_miss(ll address,core &core, L1cache &this_cache){
     // determines whether it is a hit or a miss
     // if hit - return the block index in the mapped set
     // if miss - return -1
@@ -88,7 +89,7 @@ ll hit_or_miss(ll address,struct core &core, struct L1cache &this_cache){
 }
 
 
-std::vector<ll> add_new_block(ll address,ll new_data, set &this_set,struct L1cache &this_cache){
+std::vector<ll> add_new_block(ll address,ll new_data, set &this_set, L1cache &this_cache){
     //adds new block in a given set res[0]=1 if there is a eviction writeback, res[1] gives the index of block in this set
     ll ind=0;
     ll min=INT_MAX;
@@ -110,13 +111,13 @@ std::vector<ll> add_new_block(ll address,ll new_data, set &this_set,struct L1cac
     new_block.dirty_bit=0;
     new_block.last_used=counter;
     this_set.set[ind]=new_block;
+
     return {write_eviction,ind};
      // return the index of the newly inserted block
     // caller needs to set the state of the newly inserted block
 }
 
-ll read_miss(ll address,struct core &core,struct L1cache &cache,struct mesi_data_bus &mesi_data_bus){
-    core.ct_cache_misses+=1;
+ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
     ll which_case=0; //0 - no hit, 1- exclusive , 2- shared , 3 - Modified
     block hit_block;
     
@@ -174,11 +175,12 @@ ll read_miss(ll address,struct core &core,struct L1cache &cache,struct mesi_data
     return which_case; //return which_case of readmiss so that the state of newly inserted block can be determined
 }
 
-bool read(ll address, struct core &core, struct L1cache &this_cache,struct mesi_data_bus &mesi_data_bus){
+bool read(ll address, core &core, L1cache &this_cache, mesi_data_bus &mesi_data_bus){
     core.ct_cache_hits+=1;
     ll temp=hit_or_miss(address,core,this_cache);
     ll index = (address >> (this_cache.b)) % (1 << this_cache.s);
     if(temp==-1){
+        core.ct_cache_misses+=1;
         if(mesi_data_bus.is_busy==false){
             // bus is busy, so read is not possible
             return false;
@@ -197,6 +199,7 @@ bool read(ll address, struct core &core, struct L1cache &this_cache,struct mesi_
         std::vector<ll> res = add_new_block(address,0,this_cache.table[index],this_cache);
         if(res[0]==1){
             //write_back during eviction
+            core.ct_cache_evictions+=1;
             core.wait_cycles+=100;
             mesi_data_bus.wait_cycles+=100;
         }
@@ -206,6 +209,7 @@ bool read(ll address, struct core &core, struct L1cache &this_cache,struct mesi_
     else{
         //hit 
         //make last used of tempth way of mapped set = counter
+        core.ct_cache_hits+=1;
         this_cache.table[index].set[temp].last_used=counter;
         core.wait_cycles=1;
         return true;
@@ -213,7 +217,7 @@ bool read(ll address, struct core &core, struct L1cache &this_cache,struct mesi_
 }
 
 
-ll write_miss(ll address,struct core &core,struct L1cache &this_cache,struct mesi_data_bus &mesi_data_bus){
+ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data_bus){
     core.ct_cache_misses+=1;
     ll which_case=0; //0 - no hit, 1- exclusive , 2- shared , 3 - Modified
     block hit_block;
@@ -276,6 +280,7 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
     ll temp = hit_or_miss(address,core,this_cache);
     ll index = (address >> (this_cache.b)) % (1 << this_cache.s);
     if(temp!=-1){
+        core.ct_cache_hits+=1;
         //hit
         block this_block = this_cache.table[index].set[temp];
         this_block.dirty_bit=1;
@@ -295,6 +300,7 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
     }
     else{
         //NOTE- IN case of write miss, at end of transaction, along with making state of the block M, also set the dirty bit
+        core.ct_cache_misses+=1;
         if(mesi_data_bus.is_busy==false){return false;}
 
         ll is_writeback_from_M=write_miss(address,core,this_cache,mesi_data_bus);
@@ -308,6 +314,7 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
             //write_back during eviction
             core.wait_cycles+=100;
             mesi_data_bus.wait_cycles+=100;
+            core.ct_cache_evictions+=1;
         }
         this_cache.table[index].set[res[1]].last_used=counter; //update last used for lru policy
         return true;
@@ -317,6 +324,87 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
 
 
 int main(){
-    return 0;
+    int s;int b;int E;
+    std::cin>>s>>b>>E;
+    std::vector<L1cache> caches;
+    std::vector<core> cores;
+    for(int i=0;i<4;i++){
+        L1cache this_cache;
+        this_cache.b=b;this_cache.E=E;this_cache.s=s;
+        for(int j=0;i<(1<<s);j++){
+            set temp_set;
+            for(int _=0;_<E;_++){
+                block this_block;
+                temp_set.set.push_back(this_block);
+            }
+        }
+
+        core this_core;
+        this_core.core_id=i;
+        this_core.E=E;this_core.s=s;this_core.b=b;
+    }
+    mesi_data_bus mesi_data_bus;
+    mesi_data_bus.cores=cores;mesi_data_bus.caches=caches;
+    std::vector<std::vector<std::vector<ll>>> commands=input();
+    std::vector<int> curr;
+    int n0=commands[0].size();int n1=commands[1].size();int n2=commands[2].size();int n3=commands[3].size();
+    counter=0;
+    while( curr[0]<n0 || curr[1]<n1 || curr[2]<n2 || curr[3]<n3 ){
+        int done_core=0;
+        if(mesi_data_bus.wait_cycles>0){
+            mesi_data_bus.wait_cycles-=1;
+        }
+        
+        if(mesi_data_bus.wait_cycles==0 && mesi_data_bus.is_busy==true){
+            mesi_data_bus.is_busy=false;
+            ll index = (mesi_data_bus.address >> (b)) % (1 <<s);
+            ll temp=hit_or_miss(mesi_data_bus.address,cores[mesi_data_bus.core_id],caches[mesi_data_bus.core_id]);
+            if(temp!=-1){
+                caches[mesi_data_bus.core_id].table[index].set[temp].state=mesi_data_bus.next_state;
+                if(mesi_data_bus.next_state==M){
+                    caches[mesi_data_bus.core_id].table[index].set[temp].dirty_bit=1;
+                }
+
+                
+            if(mesi_data_bus.next_state==I){
+                done_core=mesi_data_bus.core_id;
+                write(mesi_data_bus.address,cores[mesi_data_bus.core_id],caches[mesi_data_bus.core_id],mesi_data_bus);
+                done_core=mesi_data_bus.core_id;
+            }
+            }
+        }
+
+        for(int i=0;i<4;i++){
+            if(i==done_core){continue;}
+            if(curr[i]>commands[i].size()){cores[i].ct_idle_cycles+=1;continue;}
+            if(cores[i].wait_cycles==0){
+                bool temp;
+                if(commands[i][curr[i]][0]==0){
+                     temp=write(commands[i][curr[i]][1],cores[i],caches[i],mesi_data_bus);
+
+                }
+                else{
+                    temp=read(commands[i][curr[i]][1],cores[i],caches[i],mesi_data_bus);
+                }
+                if(temp==false){
+                    cores[i].ct_idle_cycles+=1;
+                }
+                else{
+                    cores[i].ct_execution_cycles+=1;
+                }
+            }
+            else{
+                cores[i].wait_cycles-=1;
+                cores[i].ct_execution_cycles+=1;
+                if(cores[i].wait_cycles==0){
+                    curr[i]++;
+                }
+            }
+        }
+        
+
+    }
+
+
 }
 
