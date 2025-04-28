@@ -2,7 +2,7 @@
 #include <fstream>
 #include <vector>
 
-std::vector<std::vector<std::vector<long long int>>> input(std::string app) {
+std::vector<std::vector<std::vector<long long int>>> input(std::string app, std::vector<long long int> &reads, std::vector<long long int> &writes) {
     std::vector<std::vector<std::vector<long long int>>> ans;
     for (int i = 0; i<4; i++){
         std::vector<std::vector<long long int>> proc;
@@ -13,7 +13,14 @@ std::vector<std::vector<std::vector<long long int>>> input(std::string app) {
         std::string line;
         while(std::getline(file,line)){
             std::vector<long long int> temp;
-            temp.push_back((line[0]=='R')?0:1); 
+            if (line[0]=='R'){
+                temp.push_back(0);
+                reads[i]+=1;
+            }
+            else{
+                temp.push_back(1);
+                writes[i]+=1;
+            }
             temp.push_back(std::stoll(line.substr(2), nullptr, 16)); 
             proc.push_back(temp);
         }

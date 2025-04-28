@@ -356,7 +356,14 @@ int main(){
     }
     mesi_data_bus mesi_data_bus;
     mesi_data_bus.cores=cores;mesi_data_bus.caches=caches;
-    std::vector<std::vector<std::vector<ll>>> commands=input(app);
+    std::vector<ll> reads(4,0);
+    std::vector<ll> writes(4,0);
+
+    std::vector<std::vector<std::vector<ll>>> commands=input(app,reads,writes);
+    for (int i=0;i<4;i++){
+        cores[i].ct_read_instructions = reads[i];
+        cores[i].ct_write_instructions = writes[i];
+    }
     std::vector<int> curr(4,0);
     int n0=commands[0].size();int n1=commands[1].size();int n2=commands[2].size();int n3=commands[3].size();
     counter=0;
