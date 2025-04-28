@@ -46,10 +46,7 @@ typedef struct set{
     std::vector<block> set; // each element of vector is [tag,block(data)]
 }set ;
 
-class Memory {
-    private:
-        std::map<ll, ll> mem;
-};
+
 
 typedef struct L1cache{
     std::vector<set> table; //maps(vector)index to set
@@ -81,7 +78,7 @@ ll hit_or_miss(ll address,core &core, L1cache &this_cache){
     ll req_tag = (address>>((this_cache.b) + (this_cache.s)));
     set this_set = this_cache.table[index];
     for(int i=0;i<this_set.set.size();i++){
-        if((this_set.set)[i].tag==req_tag && this_set.set[i].state!=I){
+        if((this_set.set)[i].tag==req_tag && this_set.set[i].valid_bit==1){
             return i;
         }
     }
@@ -101,8 +98,8 @@ std::vector<ll> add_new_block(ll address,ll new_data, set &this_set, L1cache &th
     }
     ll write_eviction=0;
     if(this_set.set[ind].valid_bit==1 && this_set.set[ind].dirty_bit==1){
-        //Invalid or empty block found
-        write_eviction=0;
+        //Valid and dirty block needs to be evicted
+        write_eviction=1;
     }
     block new_block;
     new_block.data=new_data;
@@ -111,13 +108,14 @@ std::vector<ll> add_new_block(ll address,ll new_data, set &this_set, L1cache &th
     new_block.dirty_bit=0;
     new_block.last_used=counter;
     this_set.set[ind]=new_block;
-
-    return {write_eviction,ind};
+    std::vector<ll> ans ={write_eviction,ind};
+    return ans;
      // return the index of the newly inserted block
     // caller needs to set the state of the newly inserted block
 }
 
 ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
+    core.ct_cache_misses+=1;
     ll which_case=0; //0 - no hit, 1- exclusive , 2- shared , 3 - Modified
     block hit_block;
     
@@ -137,7 +135,7 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
                 hit_block=mesi_data_bus.caches[i].table[index].set[temp];
                 which_case=1;break;
             }
-            else{
+            else if(mesi_data_bus.caches[i].table[index].set[temp].state ==S){
                 hit_block=mesi_data_bus.caches[i].table[index].set[temp];
                 which_case=2;break;
             }
@@ -145,47 +143,51 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
 
     }
 
-    mesi_data_bus.core_id=core.core_id;
+    mesi_data_bus.core_id=core.core_id;mesi_data_bus.address=address;
     mesi_data_bus.message=BusRd;
     if(which_case==0){
         // no hit
         core.wait_cycles=100 + 1; 
+        mesi_data_bus.wait_cycles=100 + 1;
+        mesi_data_bus.is_busy=true;
 
     }
     else if(which_case==1){
         // exclusive found
         hit_block.state=S; // the hitted block's state becomes shared
         core.wait_cycles=2*(core.b) + 1;
-        mesi_data_bus.wait_cycles=2*(core.b);
+        mesi_data_bus.wait_cycles=2*(core.b) +1;
+        mesi_data_bus.is_busy=true;
     }
 
     else if(which_case==2){
         // shared found , use the first cache in order to use data
         core.wait_cycles=2*(core.b) + 1;
-        mesi_data_bus.wait_cycles=2*(core.b); 
+        mesi_data_bus.wait_cycles=2*(core.b) +1; 
+        mesi_data_bus.is_busy=true;
     }
     else{
         // M found
         hit_block.state=S;
-        hit_block.dirty_bit=0;//No more  dirty,it matches with memory
+        hit_block.dirty_bit=0;//No more dirty,it matches with memory
         core.wait_cycles= 100 + 100 +1 ;
         mesi_data_bus.wait_cycles=100+100;
+        mesi_data_bus.is_busy=true;
     }
 
     return which_case; //return which_case of readmiss so that the state of newly inserted block can be determined
 }
 
 bool read(ll address, core &core, L1cache &this_cache, mesi_data_bus &mesi_data_bus){
-    core.ct_cache_hits+=1;
+    // core.ct_cache_hits+=1;
     ll temp=hit_or_miss(address,core,this_cache);
     ll index = (address >> (this_cache.b)) % (1 << this_cache.s);
     if(temp==-1){
-        core.ct_cache_misses+=1;
-        if(mesi_data_bus.is_busy==false){
+        //miss
+        if(mesi_data_bus.is_busy){
             // bus is busy, so read is not possible
             return false;
         }
-
 
 
         ll which_case = read_miss(address,core,this_cache,mesi_data_bus);
@@ -204,6 +206,7 @@ bool read(ll address, core &core, L1cache &this_cache, mesi_data_bus &mesi_data_
             mesi_data_bus.wait_cycles+=100;
         }
         this_cache.table[index].set[res[1]].last_used=counter; //update last used for lru policy
+        
         return true;
     }
     else{
@@ -300,8 +303,7 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
     }
     else{
         //NOTE- IN case of write miss, at end of transaction, along with making state of the block M, also set the dirty bit
-        core.ct_cache_misses+=1;
-        if(mesi_data_bus.is_busy==false){return false;}
+        if(mesi_data_bus.is_busy){return false;}
 
         ll is_writeback_from_M=write_miss(address,core,this_cache,mesi_data_bus);
         if(!is_writeback_from_M){
@@ -325,34 +327,45 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
 
 int main(){
     int s;int b;int E;
-    std::string app;
-    std::cin>>s>>b>>E;
-    std::cin>>app;
+    s=6;
+    b=5;
+    E=2;
+    b+=2;
+    std::string app = "app1";
+    // std::cin>>s>>b>>E;
+    // std::cin>>app;
     std::vector<L1cache> caches;
     std::vector<core> cores;
     for(int i=0;i<4;i++){
         L1cache this_cache;
         this_cache.b=b;this_cache.E=E;this_cache.s=s;
-        for(int j=0;i<(1<<s);j++){
+        for(int j=0;j<(1<<s);j++){
             set temp_set;
             for(int _=0;_<E;_++){
                 block this_block;
                 temp_set.set.push_back(this_block);
             }
+            this_cache.table.push_back(temp_set);
         }
 
         core this_core;
         this_core.core_id=i;
         this_core.E=E;this_core.s=s;this_core.b=b;
+        caches.push_back(this_cache);
+        cores.push_back(this_core);
     }
     mesi_data_bus mesi_data_bus;
     mesi_data_bus.cores=cores;mesi_data_bus.caches=caches;
     std::vector<std::vector<std::vector<ll>>> commands=input(app);
-    std::vector<int> curr;
+    std::vector<int> curr(4,0);
     int n0=commands[0].size();int n1=commands[1].size();int n2=commands[2].size();int n3=commands[3].size();
     counter=0;
     while( curr[0]<n0 || curr[1]<n1 || curr[2]<n2 || curr[3]<n3 ){
-        int done_core=0;
+        // for (int i=0;i<4;i++){
+        //     std::cout<<curr[i]<<" ";
+        // }
+
+        int done_core=-1;
         if(mesi_data_bus.wait_cycles>0){
             mesi_data_bus.wait_cycles-=1;
         }
@@ -360,6 +373,7 @@ int main(){
         if(mesi_data_bus.wait_cycles==0 && mesi_data_bus.is_busy==true){
             mesi_data_bus.is_busy=false;
             ll index = (mesi_data_bus.address >> (b)) % (1 <<s);
+
             ll temp=hit_or_miss(mesi_data_bus.address,cores[mesi_data_bus.core_id],caches[mesi_data_bus.core_id]);
             if(temp!=-1){
                 caches[mesi_data_bus.core_id].table[index].set[temp].state=mesi_data_bus.next_state;
@@ -377,14 +391,15 @@ int main(){
         }
 
         for(int i=0;i<4;i++){
-            
+            if(curr[i]==commands[i].size()){
+                continue;
+            }
             if(i==done_core){continue;}
             if(curr[i]>commands[i].size()){cores[i].ct_idle_cycles+=1;continue;}
             if(cores[i].wait_cycles==0){
                 bool temp;
-                if(commands[i][curr[i]][0]==0){
+                if(commands[i][curr[i]][0]==1){
                      temp=write(commands[i][curr[i]][1],cores[i],caches[i],mesi_data_bus);
-
                 }
                 else{
                     temp=read(commands[i][curr[i]][1],cores[i],caches[i],mesi_data_bus);
@@ -394,6 +409,7 @@ int main(){
                 }
                 else{
                     cores[i].ct_execution_cycles+=1;
+                   
                 }
             }
             else{
@@ -405,9 +421,60 @@ int main(){
             }
         }
         
-
+        counter++;
     }
 
+
+    
+    std::cout << "Simulation Parameters:\n";
+    std::cout << "Trace Prefix: app1\n";
+    std::cout << "Set Index Bits: " << s << "\n";
+    std::cout << "Associativity: " << E << "\n";
+    std::cout << "Block Bits: " << b - 2 << "\n";
+    std::cout << "Block Size (Bytes): " << (1 << (b - 2)) << "\n";
+    std::cout << "Number of Sets: " << (1 << s) << "\n";
+    std::cout << "Cache Size (KB per core): " << ((1 << s) * E * (1 << (b - 2)) / 1024) << "\n";
+    std::cout << "MESI Protocol: Enabled\n";
+    std::cout << "Write Policy: Write-back, Write-allocate\n";
+    std::cout << "Replacement Policy: LRU\n";
+    std::cout << "Bus: Central snooping bus\n\n";
+
+    ll total_bus_transactions = 0;
+    ll total_bus_traffic = 0;
+
+    for (int i = 0; i < 4; i++) {
+        ll total_instructions = cores[i].ct_read_instructions + cores[i].ct_write_instructions;
+        ll num_reads = cores[i].ct_read_instructions;
+        ll num_writes = cores[i].ct_write_instructions;
+        ll total_cycles = cores[i].ct_execution_cycles + cores[i].ct_idle_cycles;
+        ll idle_cycles = cores[i].ct_idle_cycles;
+        ll misses = cores[i].ct_cache_misses;
+        double miss_rate = (total_instructions > 0) ? (100.0 * misses / total_instructions) : 0.0;
+        ll evictions = cores[i].ct_cache_evictions;
+        ll writebacks = cores[i].ct_writebacks;
+        ll invalidations = 0; // Placeholder for invalidations (not explicitly tracked in the code)
+        ll traffic_bytes = (misses + writebacks) * (1 << (b - 2));
+
+        total_bus_transactions += misses + writebacks;
+        total_bus_traffic += traffic_bytes;
+
+        std::cout << "Core " << i << " Statistics:\n";
+        std::cout << "Total Instructions: " << total_instructions << "\n";
+        std::cout << "Total Reads: " << num_reads << "\n";
+        std::cout << "Total Writes: " << num_writes << "\n";
+        std::cout << "Total Execution Cycles: " << total_cycles << "\n";
+        std::cout << "Idle Cycles: " << idle_cycles << "\n";
+        std::cout << "Cache Misses: " << misses << "\n";
+        std::cout << "Cache Miss Rate: " << miss_rate << "%\n";
+        std::cout << "Cache Evictions: " << evictions << "\n";
+        std::cout << "Writebacks: " << writebacks << "\n";
+        std::cout << "Bus Invalidations: " << invalidations << "\n";
+        std::cout << "Data Traffic (Bytes): " << traffic_bytes << "\n\n";
+    }
+
+    std::cout << "Overall Bus Summary:\n";
+    std::cout << "Total Bus Transactions: " << total_bus_transactions << "\n";
+    std::cout << "Total Bus Traffic (Bytes): " << total_bus_traffic << "\n";
 
 }
 
