@@ -375,6 +375,7 @@ int main(){
         }
 
         for(int i=0;i<4;i++){
+            
             if(i==done_core){continue;}
             if(curr[i]>commands[i].size()){cores[i].ct_idle_cycles+=1;continue;}
             if(cores[i].wait_cycles==0){
