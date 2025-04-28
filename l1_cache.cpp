@@ -325,7 +325,9 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
 
 int main(){
     int s;int b;int E;
+    std::string app;
     std::cin>>s>>b>>E;
+    std::cin>>app;
     std::vector<L1cache> caches;
     std::vector<core> cores;
     for(int i=0;i<4;i++){
@@ -345,7 +347,7 @@ int main(){
     }
     mesi_data_bus mesi_data_bus;
     mesi_data_bus.cores=cores;mesi_data_bus.caches=caches;
-    std::vector<std::vector<std::vector<ll>>> commands=input();
+    std::vector<std::vector<std::vector<ll>>> commands=input(app);
     std::vector<int> curr;
     int n0=commands[0].size();int n1=commands[1].size();int n2=commands[2].size();int n3=commands[3].size();
     counter=0;
