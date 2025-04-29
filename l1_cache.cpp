@@ -126,7 +126,7 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
     core.ct_cache_misses+=1;
     ll which_case=0; //0 - no hit, 1- exclusive , 2- shared , 3 - Modified
     block *hit_block;
-    
+    ll hit_core=-1;
     for(int i=0;i<mesi_data_bus.caches.size();i++){
         // assume S and M cannot coexist
         ll index = (address >> (mesi_data_bus.caches[i]->b)) % (1 << mesi_data_bus.caches[i]->s);
@@ -136,16 +136,16 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
             // hit
             if(mesi_data_bus.caches[i]->table[index].set[temp].state ==M){
                 hit_block=&mesi_data_bus.caches[i]->table[index].set[temp];
-                mesi_data_bus.cores[i]->ct_writebacks+=1;
+                mesi_data_bus.cores[i]->ct_writebacks+=1;hit_core=i;
                 which_case=3;break;
             }
 
             else if(mesi_data_bus.caches[i]->table[index].set[temp].state ==E){
-                hit_block=&mesi_data_bus.caches[i]->table[index].set[temp];
+                hit_block=&mesi_data_bus.caches[i]->table[index].set[temp];hit_core=i;
                 which_case=1;break;
             }
             else if(mesi_data_bus.caches[i]->table[index].set[temp].state ==S){
-                hit_block=&mesi_data_bus.caches[i]->table[index].set[temp];
+                hit_block=&mesi_data_bus.caches[i]->table[index].set[temp];hit_core=i;
                 which_case=2;break;
             }
         } 
@@ -179,8 +179,9 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
         // M found
         hit_block->state=S;
         hit_block->dirty_bit=0;//No more dirty,it matches with memory
-        core.wait_cycles= 2*(core.b) + 100 +1 ;
-        mesi_data_bus.wait_cycles=2*(core.b)+100+1;
+        core.wait_cycles= 100 + 100 +1 ;
+        mesi_data_bus.cores[hit_core]->wait_cycles=100;
+        mesi_data_bus.wait_cycles=100+100+1;
         mesi_data_bus.is_busy=true;
     }
 
@@ -238,7 +239,7 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
     core.ct_cache_misses+=1;
     ll which_case=0; //0 - no hit, 1- exclusive , 2- shared , 3 - Modified
     block hit_block;
-    
+    ll hit_core=-1;
     for(int i=0;i<mesi_data_bus.caches.size();i++){
         // assume S and M cannot coexist
         ll index = (address >> (mesi_data_bus.caches[i]->b)) % (1 << mesi_data_bus.caches[i]->s);
@@ -248,16 +249,16 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
             // hit
             if(mesi_data_bus.caches[i]->table[index].set[temp].state ==M){
                 mesi_data_bus.cores[i]->ct_writebacks+=1;
-                hit_block=mesi_data_bus.caches[i]->table[index].set[temp];
+                hit_block=mesi_data_bus.caches[i]->table[index].set[temp];hit_core=i;
                 which_case=3;break;
             }
 
             else if(mesi_data_bus.caches[i]->table[index].set[temp].state ==E){
-                hit_block=mesi_data_bus.caches[i]->table[index].set[temp];
+                hit_block=mesi_data_bus.caches[i]->table[index].set[temp];hit_core=i;
                 which_case=1;break;
             }
             else{
-                hit_block=mesi_data_bus.caches[i]->table[index].set[temp];
+                hit_block=mesi_data_bus.caches[i]->table[index].set[temp];hit_core=i;
                 which_case=2;break;
             }
         } 
@@ -289,6 +290,7 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
     else{
         //in simulator check if mesi_bus is in Rdx and the state change in final cycle is imposed on M->I or not
         //If it is M->I, dont go on next instruction for the core and do this instruction on priority
+        mesi_data_bus.cores[hit_core]->wait_cycles=100;
         mesi_data_bus.wait_cycles=100;
         core.wait_cycles=100; //only perform write back from this M block to memory
         return 1;
@@ -358,14 +360,14 @@ void print_help() {
 }
 
 int main(int argc, char *argv[]){
-    std::string app;
-    int s = -1, E = -1, b = -1;
-    std::string outfilename;
+    std::string app="app3";
+    int s = 5, E = 6, b = 5;
+    std::string outfilename="out.txt";
     
-    if (argc == 1) {
-        print_help();
-        return 0;
-    }
+    // if (argc == 1) {
+    //     print_help();
+    //     return 0;
+    // }
 
     for (int i = 1; i < argc; ++i) {
         // std::cout << std::strcmp(argv[i],"-t") << " ";
@@ -412,7 +414,7 @@ int main(int argc, char *argv[]){
             return 1;
         }
     }
-    b+=2;
+    // b+=2;
     std::vector<L1cache> caches;
     std::vector<core> cores;
     for(int i=0;i<4;i++){
@@ -474,6 +476,7 @@ int main(int argc, char *argv[]){
 
                 
             if(mesi_data_bus.next_state==I){
+                caches[mesi_data_bus.core_id].table[index].set[temp].valid_bit=0;//as state became I,make valid bit 0
                 done_core=mesi_data_bus.core_id;
                 write(mesi_data_bus.address,cores[mesi_data_bus.core_id],caches[mesi_data_bus.core_id],mesi_data_bus);
                 done_core=mesi_data_bus.core_id;
@@ -500,14 +503,16 @@ int main(int argc, char *argv[]){
                 }
                 else{
                     cores[i].ct_execution_cycles+=1;
-                   
                 }
             }
             else{
                 cores[i].wait_cycles-=1;
-                cores[i].ct_execution_cycles+=1;
+                
                 if(cores[i].wait_cycles==0){
                     curr[i]++;
+                }
+                else{
+                    cores[i].ct_execution_cycles+=1;
                 }
             }
         }
@@ -523,8 +528,8 @@ int main(int argc, char *argv[]){
     std::cout << "Trace Prefix: app1\n";
     std::cout << "Set Index Bits: " << s << "\n";
     std::cout << "Associativity: " << E << "\n";
-    std::cout << "Block Bits: " << b - 2 << "\n";
-    std::cout << "Block Size (Bytes): " << (1 << (b - 2)) << "\n";
+    std::cout << "Block Bits: " << b << "\n";
+    std::cout << "Block Size (Bytes): " << (1 << (b)) << "\n";
     std::cout << "Number of Sets: " << (1 << s) << "\n";
     std::cout << "Cache Size (KB per core): " << ((1 << s) * E * (1 << (b - 2)) / 1024) << "\n";
     std::cout << "MESI Protocol: Enabled\n";
