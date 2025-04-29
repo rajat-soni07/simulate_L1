@@ -136,6 +136,7 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
             // hit
             if(mesi_data_bus.caches[i]->table[index].set[temp].state ==M){
                 hit_block=&mesi_data_bus.caches[i]->table[index].set[temp];
+                mesi_data_bus.cores[i]->ct_writebacks+=1;
                 which_case=3;break;
             }
 
@@ -329,7 +330,7 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
             mesi_data_bus.next_state=I;
         }
         std::vector<ll> res = add_new_block(address,0,this_cache.table[index],this_cache);
-        this_cache.table[index].set[res[1]].dirty_bit=1;
+        // this_cache.table[index].set[res[1]].dirty_bit=1;
         if(res[0]==2){
             //write_back during eviction
             core.ct_cache_evictions+=1;
