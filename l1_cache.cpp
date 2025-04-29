@@ -246,6 +246,7 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
         if(temp!=-1){
             // hit
             if(mesi_data_bus.caches[i]->table[index].set[temp].state ==M){
+                mesi_data_bus.cores[i]->ct_writebacks+=1;
                 hit_block=mesi_data_bus.caches[i]->table[index].set[temp];
                 which_case=3;break;
             }
