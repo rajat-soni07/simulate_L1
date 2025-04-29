@@ -263,6 +263,7 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
 
     }
     ll index = (address >> (this_cache.b)) % (1 << this_cache.s);
+    mesi_data_bus.core_id=core.core_id;mesi_data_bus.address=address;
     mesi_data_bus.message=BusRdx;
     //Snooping in occurs as caches see BusRdx on data_bu
     if(which_case==0){
