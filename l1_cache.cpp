@@ -179,8 +179,8 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
         // M found
         hit_block->state=S;
         hit_block->dirty_bit=0;//No more dirty,it matches with memory
-        core.wait_cycles= 100 + 100 +1 ;
-        mesi_data_bus.wait_cycles=100+100;
+        core.wait_cycles= 2*(core.b) + 100 +1 ;
+        mesi_data_bus.wait_cycles=2*(core.b)+100+1;
         mesi_data_bus.is_busy=true;
     }
 
@@ -265,7 +265,7 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
     }
     ll index = (address >> (this_cache.b)) % (1 << this_cache.s);
     mesi_data_bus.core_id=core.core_id;mesi_data_bus.address=address;
-    mesi_data_bus.message=BusRdx;
+    mesi_data_bus.message=BusRdx;mesi_data_bus.is_busy=true;
     //Snooping in occurs as caches see BusRdx on data_bu
     if(which_case==0){
         core.wait_cycles=100+1;
