@@ -2,10 +2,11 @@
 #include <map>
 #include <vector>
 #include <cstring>
-#define ll long long int
-#include "input.cpp"
+#include <climits>
 #include <fstream>
+#include "input.cpp"
 
+#define ll long long int
 
 //when running for a core, access its cache's read/write function and provide the core struct as argument
 ll counter=0;
@@ -14,7 +15,7 @@ ll counter=0;
 // (32-s-b) bits   |  s bits  |  b bits  |
 
 enum mesi_state { I, M, S, E };
-enum message {BusRd,BusRdx}; //BusRdx is RWITM  
+enum mess {BusRd,BusRdx}; //BusRdx is RWITM  
 
 
 typedef struct block{
@@ -63,7 +64,7 @@ typedef struct mesi_data_bus{
     ll address;
     int core_id; // core id
     mesi_state next_state; // at end of bus operation, find this address in core id cache and update the state
-    message message; // type of the transaction (read/write)
+    mess message; // type of the transaction (read/write)
     bool is_busy=false;
     ll wait_cycles=0;
     std::vector<core*> cores; // vector of cores as per core id
@@ -542,15 +543,15 @@ int main(int argc, char *argv[]){
     std::ofstream output_file(outfilename);
     std::streambuf *cout_buf = std::cout.rdbuf();
     std::cout.rdbuf(output_file.rdbuf());
-    
+    // std::cout << "Maximum Execution Time: " << cores[3].ct_idle_cycles + cores[3].ct_execution_cycles << " cycles\n\n";
     std::cout << "Simulation Parameters:\n";
-    std::cout << "Trace Prefix: app1\n";
+    std::cout << "Trace Prefix: " << app << "\n";
     std::cout << "Set Index Bits: " << s << "\n";
     std::cout << "Associativity: " << E << "\n";
     std::cout << "Block Bits: " << b << "\n";
-    std::cout << "Block Size (Bytes): " << (1 << (b - 2)) << "\n";
+    std::cout << "Block Size (Bytes): " << (1 << (b)) << "\n";
     std::cout << "Number of Sets: " << (1 << s) << "\n";
-    std::cout << "Cache Size (KB per core): " << ((1 << s) * E * (1 << (b - 2)) / 1024) << "\n";
+    std::cout << "Cache Size (KB per core): " << ((1 << s) * E * (1 << (b)) / 1024) << "\n";
     std::cout << "MESI Protocol: Enabled\n";
     std::cout << "Write Policy: Write-back, Write-allocate\n";
     std::cout << "Replacement Policy: LRU\n";
@@ -570,7 +571,7 @@ int main(int argc, char *argv[]){
         ll evictions = cores[i].ct_cache_evictions;
         ll writebacks = cores[i].ct_writebacks;
         ll invalidations = cores[i].ct_invalidations;
-        ll traffic_bytes = (misses + writebacks) * (1 << (b - 2));
+        ll traffic_bytes = (misses + writebacks) * (1 << (b));
 
         total_bus_transactions += misses + writebacks;
         total_bus_traffic += traffic_bytes;
