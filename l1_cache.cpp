@@ -124,7 +124,7 @@ std::vector<ll> add_new_block(ll address,ll new_data, set &this_set, L1cache &th
 }
 
 ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
-    core.ct_cache_misses+=1;
+    core.ct_cache_misses+=1;core.is_our_instruction=true;
     ll which_case=0; //0 - no hit, 1- exclusive , 2- shared , 3 - Modified
     block *hit_block;
     ll hit_core=-1;
@@ -136,13 +136,15 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
         if(temp!=-1){
             // hit
             if(mesi_data_bus.caches[i]->table[index].set[temp].state ==M){
-                hit_block=&mesi_data_bus.caches[i]->table[index].set[temp];
+                mesi_data_bus.caches[i]->table[index].set[temp].state=S;
+                mesi_data_bus.caches[i]->table[index].set[temp].dirty_bit=0;
                 mesi_data_bus.cores[i]->ct_writebacks+=1;hit_core=i;
                 which_case=3;break;
             }
 
             else if(mesi_data_bus.caches[i]->table[index].set[temp].state ==E){
-                hit_block=&mesi_data_bus.caches[i]->table[index].set[temp];hit_core=i;
+                mesi_data_bus.caches[i]->table[index].set[temp].state=S;
+                hit_core=i;
                 which_case=1;break;
             }
             else if(mesi_data_bus.caches[i]->table[index].set[temp].state ==S){
@@ -158,42 +160,37 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
     if(which_case==0){
         // no hit
         core.wait_cycles=100 + 1; 
-        core.is_our_instruction=true;
         mesi_data_bus.wait_cycles=100;
         mesi_data_bus.is_busy=true;
 
     }
     else if(which_case==1){
         // exclusive found
-        hit_block->state=S; // the hitted block's state becomes shared
         core.wait_cycles=2*(core.b) + 1;
-        core.is_our_instruction=true;
         mesi_data_bus.wait_cycles=2*(core.b);
         mesi_data_bus.is_busy=true;
-        mesi_data_bus.cores[hit_core]->wait_cycles=2*(core.b);
-        mesi_data_bus.cores[hit_core]->is_our_instruction=false;
+        // mesi_data_bus.cores[hit_core]->wait_cycles=2*(core.b);
+        // mesi_data_bus.cores[hit_core]->is_our_instruction=false;
     }
 
     else if(which_case==2){
         // shared found , use the first cache in order to use data
         core.wait_cycles=2*(core.b) + 1;
-        core.is_our_instruction=true;
+
         mesi_data_bus.wait_cycles=2*(core.b); 
         mesi_data_bus.is_busy=true;
-        mesi_data_bus.cores[hit_core]->wait_cycles=2*(core.b);
-        mesi_data_bus.cores[hit_core]->is_our_instruction=false;
+        // mesi_data_bus.cores[hit_core]->wait_cycles=2*(core.b);
+        // mesi_data_bus.cores[hit_core]->is_our_instruction=false;
     }
     else{
         // M found
-        hit_block->state=S;
-        hit_block->dirty_bit=0;//No more dirty,it matches with memory
         core.wait_cycles= 100 + 100 +1 ;
-        core.is_our_instruction=true;
-        core.ct_execution_cycles-=100;
+
+        // core.ct_execution_cycles-=100;
         mesi_data_bus.wait_cycles=100+100;
         mesi_data_bus.is_busy=true;
-        mesi_data_bus.cores[hit_core]->wait_cycles=100;
-        mesi_data_bus.cores[hit_core]->is_our_instruction=false;
+        // mesi_data_bus.cores[hit_core]->wait_cycles=100;
+        // mesi_data_bus.cores[hit_core]->is_our_instruction=false;
     }
 
     return which_case; //return which_case of readmiss so that the state of newly inserted block can be determined
@@ -209,7 +206,6 @@ bool read(ll address, core &core, L1cache &this_cache, mesi_data_bus &mesi_data_
             // bus is busy, so read is not possible
             return false;
         }
-
 
         ll which_case = read_miss(address,core,this_cache,mesi_data_bus);
         if(which_case==0){
@@ -260,6 +256,7 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
             // hit
             if(mesi_data_bus.caches[i]->table[index].set[temp].state ==M){
                 mesi_data_bus.cores[i]->ct_writebacks+=1;
+                mesi_data_bus.cores[i]->ct_invalidations+=1;
                 mesi_data_bus.caches[i]->table[index].set[temp].state=I;
                 mesi_data_bus.caches[i]->table[index].set[temp].valid_bit=0;
                 mesi_data_bus.caches[i]->table[index].set[temp].dirty_bit=0;
@@ -268,12 +265,11 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
             }
 
             else if(mesi_data_bus.caches[i]->table[index].set[temp].state ==E){
-                hit_block=mesi_data_bus.caches[i]->table[index].set[temp];hit_core=i;
+                hit_core=i;
                 which_case=1;break;
             }
             else{
                 //Make hitblock I and valid_bit 0
-
                 hit_core=i;
                 which_case=2;break;
             }
@@ -286,16 +282,15 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
     //Snooping in occurs as caches see BusRdx on data_bus
     if(which_case==0){
         core.wait_cycles=100+1;
-        core.is_our_instruction=true;
+
         mesi_data_bus.wait_cycles=100;
         return 0;
     }
     else if(which_case==1 or which_case==2){
         core.wait_cycles=2*(core.b) +1 ;
-        core.is_our_instruction=true;
         mesi_data_bus.wait_cycles=2*(core.b);
-        mesi_data_bus.cores[hit_core]->wait_cycles=2*(core.b); // make snooping core busy
-        mesi_data_bus.cores[hit_core]->is_our_instruction=false;
+        // mesi_data_bus.cores[hit_core]->wait_cycles=2*(core.b); // make snooping core busy
+        // mesi_data_bus.cores[hit_core]->is_our_instruction=false;
         //Invalidate all states
         for(int i=0;i<mesi_data_bus.caches.size();i++){
             
@@ -312,13 +307,8 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
         //in simulator check if mesi_bus is in Rdx and the state change in final cycle is imposed on M->I or not
         //If it is M->I, dont go on next instruction for the core and do this instruction on priority
         // mesi_data_bus.cores[hit_core]->wait_cycles=100; //make snooping core busy in writeback
-        mesi_data_bus.core_id=core.core_id;
         mesi_data_bus.wait_cycles=100+100;
         core.wait_cycles=100+100+1; 
-        core.is_our_instruction=true;
-        core.ct_execution_cycles-=100;
-        mesi_data_bus.cores[hit_core]->wait_cycles=100; 
-        mesi_data_bus.cores[hit_core]->is_our_instruction=false;
         return 1;
     }
 
@@ -330,11 +320,12 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
     if(temp!=-1){
         core.ct_cache_hits+=1;
         //hit
-        // block &this_block = this_cache.table[index].set[temp];
         this_cache.table[index].set[temp].dirty_bit=1;
-        core.wait_cycles=1;core.is_our_instruction=true;
+        core.wait_cycles=1;
+        core.is_our_instruction=true;
         if(this_cache.table[index].set[temp].state==S){
             for(int i=0;i<mesi_data_bus.caches.size();i++){
+                if(i==core.core_id){continue;}
                 ll temp=hit_or_miss(address,core,*mesi_data_bus.caches[i]);
                 if(temp!=-1){
                     mesi_data_bus.caches[i]->table[index].set[temp].state=I;
@@ -353,7 +344,6 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
         if(mesi_data_bus.is_busy){return false;}
 
         ll is_writeback_from_M=write_miss(address,core,this_cache,mesi_data_bus);
-
         mesi_data_bus.next_state=M;
         std::vector<ll> res = add_new_block(address,0,this_cache.table[index],this_cache);
 
@@ -479,9 +469,7 @@ int main(int argc, char *argv[]){
     int n0=commands[0].size();int n1=commands[1].size();int n2=commands[2].size();int n3=commands[3].size();
     counter=0;
     while( curr[0]<n0 || curr[1]<n1 || curr[2]<n2 || curr[3]<n3 || mesi_data_bus.wait_cycles>0){
-        // for (int i=0;i<4;i++){
-        //     std::cout<<curr[i]<<" ";
-        // }
+
 
         int done_core=-1;
         if(mesi_data_bus.wait_cycles==0 && mesi_data_bus.is_busy==true){
@@ -494,16 +482,7 @@ int main(int argc, char *argv[]){
                 if(mesi_data_bus.next_state==M){
                     caches[mesi_data_bus.core_id].table[index].set[temp].dirty_bit=1;
                 }
-                if(mesi_data_bus.next_state==I){
-                    caches[mesi_data_bus.core_id].table[index].set[temp].valid_bit=0;
-                }
-        
-            // if(mesi_data_bus.next_state==I){
-            //     done_core=mesi_data_bus.core_id;
-            //     caches[mesi_data_bus.core_id].table[index].set[temp].valid_bit=0;
-            //     write(mesi_data_bus.address,cores[mesi_data_bus.core_id],caches[mesi_data_bus.core_id],mesi_data_bus);
-            //     done_core=mesi_data_bus.core_id;
-            // }
+                
             }
         }
         for(int i=0;i<4;i++){
@@ -534,7 +513,7 @@ int main(int argc, char *argv[]){
                 }
                 else{
                     cores[i].wait_cycles-=1;
-                    if(cores[i].wait_cycles==0 && cores[i].is_our_instruction){curr[i]++;cores[i].is_our_instruction=false;}
+                    if(cores[i].wait_cycles==0){curr[i]++;cores[i].is_our_instruction=false;}
                     cores[i].ct_execution_cycles+=1;
                    
                 }
@@ -542,7 +521,7 @@ int main(int argc, char *argv[]){
             else{
                 cores[i].wait_cycles-=1;
                 cores[i].ct_execution_cycles+=1;
-                if(cores[i].wait_cycles==0 && cores[i].is_our_instruction){
+                if(cores[i].wait_cycles==0){
                     cores[i].is_our_instruction=false;
                     curr[i]++;
                 }
