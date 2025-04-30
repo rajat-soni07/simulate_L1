@@ -184,8 +184,11 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
     }
     else{
         // M found
-        core.wait_cycles= 100 + 100 +1 ;
-
+        core.wait_cycles= 100 + (1<<(core.b -1 )) +1 ;
+        core.ct_execution_cycles-=100;
+        core.ct_idle_cycles+=100;
+        mesi_data_bus.cores[hit_core]->ct_execution_cycles+=100;
+        mesi_data_bus.cores[hit_core]->ct_idle_cycles-=100;
         // core.ct_execution_cycles-=100;
         mesi_data_bus.wait_cycles=100+100;
         mesi_data_bus.is_busy=true;
@@ -308,7 +311,8 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
         //If it is M->I, dont go on next instruction for the core and do this instruction on priority
         // mesi_data_bus.cores[hit_core]->wait_cycles=100; //make snooping core busy in writeback
         mesi_data_bus.wait_cycles=100+100;
-        core.wait_cycles=100+100+1; 
+        core.wait_cycles=100+100+1; core.ct_execution_cycles-=100;mesi_data_bus.cores[hit_core]->ct_execution_cycles+=100;
+        core.ct_idle_cycles+=100;mesi_data_bus.cores[hit_core]->ct_idle_cycles-=100;
         return 1;
     }
 
@@ -485,8 +489,12 @@ int main(int argc, char *argv[]){
                 
             }
         }
+        std::vector<ll> completion_cycles(4,LONG_LONG_MAX);
         for(int i=0;i<4;i++){
             if(curr[i]==commands[i].size()){
+                if(completion_cycles[i]>counter){
+                    completion_cycles[i]=counter;
+                }
                 continue;
             }
             if(i==done_core){continue;}
@@ -527,6 +535,10 @@ int main(int argc, char *argv[]){
         counter++;
     }
 
+    for(int i=0;i<4;i++){
+        cores[i].ct_idle_cycles=counter-cores[i].ct_execution_cycles;
+    }
+
     std::ofstream output_file(outfilename);
     std::streambuf *cout_buf = std::cout.rdbuf();
     std::cout.rdbuf(output_file.rdbuf());
@@ -535,7 +547,7 @@ int main(int argc, char *argv[]){
     std::cout << "Trace Prefix: app1\n";
     std::cout << "Set Index Bits: " << s << "\n";
     std::cout << "Associativity: " << E << "\n";
-    std::cout << "Block Bits: " << b - 2 << "\n";
+    std::cout << "Block Bits: " << b << "\n";
     std::cout << "Block Size (Bytes): " << (1 << (b - 2)) << "\n";
     std::cout << "Number of Sets: " << (1 << s) << "\n";
     std::cout << "Cache Size (KB per core): " << ((1 << s) * E * (1 << (b - 2)) / 1024) << "\n";
