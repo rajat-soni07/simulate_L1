@@ -166,8 +166,8 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
     }
     else if(which_case==1){
         // exclusive found
-        core.wait_cycles=2*(core.b) + 1;
-        mesi_data_bus.wait_cycles=2*(core.b);
+        core.wait_cycles=2*(1<<(core.b - 2)) + 1;
+        mesi_data_bus.wait_cycles=2*(1<<(core.b - 2));
         mesi_data_bus.is_busy=true;
         // mesi_data_bus.cores[hit_core]->wait_cycles=2*(core.b);
         // mesi_data_bus.cores[hit_core]->is_our_instruction=false;
@@ -175,9 +175,9 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
 
     else if(which_case==2){
         // shared found , use the first cache in order to use data
-        core.wait_cycles=2*(core.b) + 1;
+        core.wait_cycles=(1<<(core.b - 1)) + 1;
 
-        mesi_data_bus.wait_cycles=2*(core.b); 
+        mesi_data_bus.wait_cycles=(1<<(core.b - 1)); 
         mesi_data_bus.is_busy=true;
         // mesi_data_bus.cores[hit_core]->wait_cycles=2*(core.b);
         // mesi_data_bus.cores[hit_core]->is_our_instruction=false;
@@ -287,11 +287,11 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
         return 0;
     }
     else if(which_case==1 or which_case==2){
-        core.wait_cycles=2*(core.b) +1 ;
-        mesi_data_bus.wait_cycles=2*(core.b);
+        core.wait_cycles=100 +1 ;
+        mesi_data_bus.wait_cycles=100;
         // mesi_data_bus.cores[hit_core]->wait_cycles=2*(core.b); // make snooping core busy
         // mesi_data_bus.cores[hit_core]->is_our_instruction=false;
-        //Invalidate all states
+        // Invalidate all states
         for(int i=0;i<mesi_data_bus.caches.size();i++){
             
             ll temp=hit_or_miss(address,core,*mesi_data_bus.caches[i]);
@@ -429,7 +429,7 @@ int main(int argc, char *argv[]){
         }
     }
     // s=5;E=2;b=5;outfilename="out.txt";app="app1";
-    b+=2;
+    // b+=2;
     std::vector<L1cache> caches;
     std::vector<core> cores;
     for(int i=0;i<4;i++){
@@ -487,13 +487,6 @@ int main(int argc, char *argv[]){
         }
         for(int i=0;i<4;i++){
             if(curr[i]==commands[i].size()){
-                if(cores[i].wait_cycles>0){
-                    cores[i].ct_execution_cycles+=1;
-                    cores[i].wait_cycles-=1;
-                }
-                else{
-                    cores[i].ct_idle_cycles+=1;
-                }
                 continue;
             }
             if(i==done_core){continue;}
@@ -522,7 +515,6 @@ int main(int argc, char *argv[]){
                 cores[i].wait_cycles-=1;
                 cores[i].ct_execution_cycles+=1;
                 if(cores[i].wait_cycles==0){
-                    cores[i].is_our_instruction=false;
                     curr[i]++;
                 }
             }
@@ -591,5 +583,4 @@ int main(int argc, char *argv[]){
 
     output_file.close();
     std::cout.rdbuf(cout_buf);
-
 }
