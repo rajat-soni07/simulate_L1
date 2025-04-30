@@ -10,6 +10,7 @@
 
 //when running for a core, access its cache's read/write function and provide the core struct as argument
 ll counter=0;
+ll bus_transactions=0;
 // address is 32 bit out of which 2 are offset bits(as data is a word of 4 bytes)
 // ---tag---|--index--|--offset--|
 // (32-s-b) bits   |  s bits  |  b bits  |
@@ -125,7 +126,7 @@ std::vector<ll> add_new_block(ll address,ll new_data, set &this_set, L1cache &th
 }
 
 ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
-    core.ct_cache_misses+=1;core.is_our_instruction=true;
+    core.ct_cache_misses+=1;core.is_our_instruction=true;bus_transactions++;
     ll which_case=0; //0 - no hit, 1- exclusive , 2- shared , 3 - Modified
     block *hit_block;
     ll hit_core=-1;
@@ -245,6 +246,7 @@ bool read(ll address, core &core, L1cache &this_cache, mesi_data_bus &mesi_data_
 
 
 ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data_bus){
+    bus_transactions++;
     core.ct_cache_misses+=1;
     ll which_case=0; //0 - no hit, 1- exclusive , 2- shared , 3 - Modified
     block hit_block;
@@ -332,10 +334,11 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
                     mesi_data_bus.caches[i]->table[index].set[temp].valid_bit=0;
                 }
             }
+            mesi_data_bus.wait_cycles=1; bus_transactions++;
         }
         core.ct_cache_hits+=1;
         core.wait_cycles=1;
-        mesi_data_bus.wait_cycles=1;
+
         this_cache.table[index].set[temp].state=M;
         this_cache.table[index].set[temp].dirty_bit=1;
         this_cache.table[index].set[temp].last_used=counter;
@@ -553,9 +556,8 @@ int main(int argc, char *argv[]){
     std::cout << "Write Policy: Write-back, Write-allocate\n";
     std::cout << "Replacement Policy: LRU\n";
     std::cout << "Bus: Central snooping bus\n\n";
+    ll total_bus_traffic=0;
 
-    ll total_bus_transactions = 0;
-    ll total_bus_traffic = 0;
 
     for (int i = 0; i < 4; i++) {
         ll total_instructions = cores[i].ct_read_instructions + cores[i].ct_write_instructions;
@@ -570,7 +572,6 @@ int main(int argc, char *argv[]){
         ll invalidations = cores[i].ct_invalidations;
         ll traffic_bytes = (misses + writebacks) * (1 << (b));
 
-        total_bus_transactions += misses + writebacks;
         total_bus_traffic += traffic_bytes;
 
         std::cout << "Core " << i << " Statistics:\n";
@@ -588,7 +589,7 @@ int main(int argc, char *argv[]){
     }
 
     std::cout << "Overall Bus Summary:\n";
-    std::cout << "Total Bus Transactions: " << total_bus_transactions << "\n";
+    std::cout << "Total Bus Transactions: " << bus_transactions << "\n";
     std::cout << "Total Bus Traffic (Bytes): " << total_bus_traffic << "\n";
 
     output_file.close();
