@@ -187,11 +187,9 @@ ll read_miss(ll address,core &core,L1cache &cache,mesi_data_bus &mesi_data_bus){
         // M found
         core.wait_cycles= 100 + (1<<(core.b -1 )) +1 ;
         core.ct_execution_cycles-=100;
-        core.ct_idle_cycles+=100;
         mesi_data_bus.cores[hit_core]->ct_execution_cycles+=100;
-        mesi_data_bus.cores[hit_core]->ct_idle_cycles-=100;
         // core.ct_execution_cycles-=100;
-        mesi_data_bus.wait_cycles=100+100;
+        mesi_data_bus.wait_cycles=100+(1<<(core.b -1 ));
         mesi_data_bus.is_busy=true;
         // mesi_data_bus.cores[hit_core]->wait_cycles=100;
         // mesi_data_bus.cores[hit_core]->is_our_instruction=false;
@@ -286,7 +284,6 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
     //Snooping in occurs as caches see BusRdx on data_bus
     if(which_case==0){
         core.wait_cycles=100+1;
-
         mesi_data_bus.wait_cycles=100;
         return 0;
     }
