@@ -322,12 +322,9 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
     ll temp = hit_or_miss(address,core,this_cache);
     ll index = (address >> (this_cache.b)) % (1 << this_cache.s);
     if(temp!=-1){
-        core.ct_cache_hits+=1;
-        //hit
-        this_cache.table[index].set[temp].dirty_bit=1;
-        core.wait_cycles=1;
-        core.is_our_instruction=true;
+
         if(this_cache.table[index].set[temp].state==S){
+            if(mesi_data_bus.is_busy==true){return false;}
             for(int i=0;i<mesi_data_bus.caches.size();i++){
                 if(i==core.core_id){continue;}
                 ll temp=hit_or_miss(address,core,*mesi_data_bus.caches[i]);
@@ -338,6 +335,9 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
                 }
             }
         }
+        core.ct_cache_hits+=1;
+        core.wait_cycles=1;
+        mesi_data_bus.wait_cycles=1;
         this_cache.table[index].set[temp].state=M;
         this_cache.table[index].set[temp].dirty_bit=1;
         this_cache.table[index].set[temp].last_used=counter;
