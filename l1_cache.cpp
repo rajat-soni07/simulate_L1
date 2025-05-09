@@ -11,6 +11,7 @@
 //when running for a core, access its cache's read/write function and provide the core struct as argument
 ll counter=0;
 ll bus_transactions=0;
+ll ct_something=0;
 // address is 32 bit out of which 2 are offset bits(as data is a word of 4 bytes)
 // ---tag---|--index--|--offset--|
 // (32-s-b) bits   |  s bits  |  b bits  |
@@ -309,10 +310,10 @@ ll write_miss(ll address,core &core,L1cache &this_cache,mesi_data_bus &mesi_data
     else{
         //in simulator check if mesi_bus is in Rdx and the state change in final cycle is imposed on M->I or not
         //If it is M->I, dont go on next instruction for the core and do this instruction on priority
-        // mesi_data_bus.cores[hit_core]->wait_cycles=100; //make snooping core busy in writeback
         mesi_data_bus.wait_cycles=100+100;
         core.wait_cycles=100+100+1; core.ct_execution_cycles-=100;mesi_data_bus.cores[hit_core]->ct_execution_cycles+=100;
-        core.ct_idle_cycles+=100;mesi_data_bus.cores[hit_core]->ct_idle_cycles-=100;
+        bus_transactions++;
+        // core.ct_idle_cycles+=100;mesi_data_bus.cores[hit_core]->ct_idle_cycles-=100;
         return 1;
     }
 
@@ -322,7 +323,7 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
     ll temp = hit_or_miss(address,core,this_cache);
     ll index = (address >> (this_cache.b)) % (1 << this_cache.s);
     if(temp!=-1){
-
+        ct_something++;
         if(this_cache.table[index].set[temp].state==S){
             if(mesi_data_bus.is_busy==true){return false;}
             for(int i=0;i<mesi_data_bus.caches.size();i++){
@@ -334,6 +335,7 @@ bool write(ll address,core &core,L1cache &this_cache, mesi_data_bus &mesi_data_b
                     mesi_data_bus.caches[i]->table[index].set[temp].valid_bit=0;
                 }
             }
+            
             mesi_data_bus.wait_cycles=1; bus_transactions++;
         }
         core.ct_cache_hits+=1;
@@ -591,6 +593,7 @@ int main(int argc, char *argv[]){
     std::cout << "Overall Bus Summary:\n";
     std::cout << "Total Bus Transactions: " << bus_transactions << "\n";
     std::cout << "Total Bus Traffic (Bytes): " << total_bus_traffic << "\n";
+    // std::cout << "Ct_Something " << ct_something << "\n";
 
     output_file.close();
     std::cout.rdbuf(cout_buf);
